@@ -5,11 +5,16 @@ import logging
 import json
 import traceback
 from typing import Optional, Dict, Any, AsyncGenerator
+from uuid import UUID
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Header, Form
 from fastapi.responses import JSONResponse, StreamingResponse
+from supabase import Client
 import httpx
 from dotenv import load_dotenv
+
+from app.database import get_supabase
+from app.services.thread import get_thread_service, ThreadService
 
 # Load env from project root (where main.py/.env located)
 load_dotenv()
@@ -30,6 +35,27 @@ logger = logging.getLogger("uvicorn.error")
 
 if not GROQ_API_KEY:
     logger.warning("GROQ_API_KEY not set — STT/LLM calls will fail until configured.")
+
+
+# -------------------- Auth Helper --------------------
+
+async def get_current_user_id(
+    authorization: str = Header(..., description="Bearer token")
+) -> UUID:
+    """Extract and verify user from JWT token"""
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid authorization header")
+
+    token = authorization.replace("Bearer ", "")
+
+    try:
+        supabase: Client = get_supabase()
+        user = supabase.auth.get_user(token)
+        if not user or not user.user:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        return UUID(user.user.id)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
 
 
 # -------------------- Helpers --------------------
@@ -307,20 +333,32 @@ async def groq_stt_and_llm(
 @router.post("/groq_stream")
 async def groq_stt_and_llm_stream(
     audio: UploadFile = File(...),
-    stt_model: Optional[str] = None,
-    llm_model: Optional[str] = None
+    thread_id: Optional[str] = Form(None),
+    stt_model: Optional[str] = Form(None),
+    llm_model: Optional[str] = Form(None),
+    user_id: UUID = Depends(get_current_user_id),
+    thread_service: ThreadService = Depends(get_thread_service),
 ):
     """
     STT + LLM with streaming response via Server-Sent Events (SSE).
 
+    Supports thread continuation like Gemini chat endpoint:
+    - If thread_id provided: continues existing conversation with audio input
+    - If thread_id not provided: creates new thread
+
     Flow:
-      1. Transcribe audio via Groq STT
-      2. Stream LLM response via SSE
+      1. Create/get thread
+      2. Transcribe audio via Groq STT
+      3. Save user message (with audio URL)
+      4. Stream LLM response via SSE (with conversation history)
+      5. Save assistant response
 
     SSE Events:
-      - type: 'transcript' - Contains the transcribed text
+      - type: 'thread_created' - New thread ID (if new thread)
+      - type: 'transcript' - Transcribed text
       - type: 'chunk' - Streaming chunks of LLM response
       - type: 'done' - Final complete response
+      - type: 'title_generated' - Auto-generated title (if new thread)
       - type: 'error' - Error occurred
     """
     if not GROQ_API_KEY:
@@ -330,6 +368,37 @@ async def groq_stt_and_llm_stream(
     ct = audio.content_type or ""
     if not (ct.startswith("audio/") or ct.startswith("video/")):
         raise HTTPException(status_code=400, detail="Upload an audio/video file (Content-Type audio/* or video/*)")
+
+    # -------------------- Thread Management --------------------
+    is_new_thread = thread_id is None
+    history = []
+    thread = None
+
+    if thread_id:
+        # Existing thread - get context
+        thread_uuid = UUID(thread_id)
+        thread = await thread_service.get_thread(thread_uuid, user_id)
+        if not thread:
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        # Get conversation history
+        messages = await thread_service.get_thread_messages(thread_uuid)
+        history = [
+            {"role": msg["role"], "content": msg["content"]}
+            for msg in messages
+        ]
+        system_instruction = thread["system_instruction"]
+    else:
+        # New thread - create it
+        thread = await thread_service.create_thread(
+            user_id=user_id,
+            system_instruction=SYSTEM_CONTEXT,
+            title=None,
+        )
+        if not thread:
+            raise HTTPException(status_code=500, detail="Failed to create thread")
+        thread_uuid = UUID(thread["id"])
+        system_instruction = SYSTEM_CONTEXT
 
     # save uploaded file to disk (streamed)
     tmp_path = await save_upload_to_tempfile(audio)
@@ -375,22 +444,47 @@ async def groq_stt_and_llm_stream(
         except Exception:
             logger.debug("Failed to remove tmp file %s", tmp_path)
 
+    # -------------------- Save Audio & User Message --------------------
+    # Upload audio to storage
+    audio_data = open(tmp_path, "rb").read() if os.path.exists(tmp_path) else None
+    audio_url = None
+    if audio_data:
+        audio_url = await thread_service.upload_audio(
+            user_id=user_id,
+            thread_id=thread_uuid,
+            audio_data=audio_data,
+            filename="audio.wav"
+        )
+
+    # Save user message
+    await thread_service.add_message(
+        thread_id=thread_uuid,
+        role="user",
+        content=transcript or "[Audio message]",
+        audio_url=audio_url,
+    )
+
     # ---------- 2) Stream LLM Response ----------
     async def generate_stream() -> AsyncGenerator[str, None]:
         """Generate SSE stream of LLM response"""
-        # Send transcript first
+        # For new threads, send the thread_id first
+        if is_new_thread:
+            yield f"data: {json.dumps({'type': 'thread_created', 'thread_id': str(thread_uuid)})}\n\n"
+
+        # Send transcript
         yield f"data: {json.dumps({'type': 'transcript', 'content': transcript})}\n\n"
 
         llm_endpoint = f"{GROQ_API_BASE.rstrip('/')}/chat/completions"
         model_to_use = llm_model or GROQ_LLM_MODEL
-        user_prompt = f"Transcript:\n{transcript}\n\nPlease reply concisely according to the system rules."
+
+        # Build messages with history
+        messages = [{"role": "system", "content": system_instruction}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": transcript})
 
         llm_body = {
             "model": model_to_use,
-            "messages": [
-                {"role": "system", "content": SYSTEM_CONTEXT},
-                {"role": "user", "content": user_prompt}
-            ],
+            "messages": messages,
             "temperature": 0.0,
             "max_tokens": 300,
             "stream": True  # Enable streaming
@@ -429,6 +523,28 @@ async def groq_stt_and_llm_stream(
                                     yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
                         except json.JSONDecodeError:
                             continue
+
+            # Save assistant response to database
+            await thread_service.add_message(
+                thread_id=thread_uuid,
+                role="assistant",
+                content=full_response,
+            )
+
+            # Generate title for new threads only
+            if is_new_thread:
+                try:
+                    from app.services.gemini import get_gemini_service
+                    gemini = get_gemini_service()
+                    title = await gemini.generate_title(transcript, full_response)
+                    await thread_service.update_thread(
+                        thread_id=thread_uuid,
+                        user_id=user_id,
+                        title=title,
+                    )
+                    yield f"data: {json.dumps({'type': 'title_generated', 'title': title})}\n\n"
+                except Exception:
+                    pass  # Title generation is optional
 
             # Send done event
             yield f"data: {json.dumps({'type': 'done', 'content': full_response})}\n\n"
