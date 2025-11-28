@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.routers import item
+
 app = FastAPI(
     title="Amartha Hackathon API",
     description="Backend API for Amartha Hackathon",
@@ -15,6 +17,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(item.router)
 
 
 @app.get("/")
