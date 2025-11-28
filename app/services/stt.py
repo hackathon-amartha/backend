@@ -4,10 +4,10 @@ import tempfile
 import logging
 import json
 import traceback
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, AsyncGenerator
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import httpx
 from dotenv import load_dotenv
 
@@ -105,13 +105,20 @@ Amartha adalah perusahaan fintech P2P Lending yang terdaftar dan diawasi OJK, fo
 
 ## PRODUK & LAYANAN
 
-### 1. PINJAMAN UNTUK MITRA (Ibu-ibu UMKM)
+### 1. PINJAMAN UNTUK MITRA (Perempuan UMKM)
 **Group Loan & Modal** (sama, bedanya cara repayment)
-- Khusus untuk ibu-ibu mitra UMKM
+- Khusus untuk perempuan mitra UMKM usia 18-58 tahun
 - Sistem majelis: kelompok 5 orang, bergabung ke majelis 15-20 orang
 - Tanggung renteng: anggota saling menjamin kredibilitas
+- Harus memiliki usaha mikro dan aktif dalam kelompok
 - Jumlah pinjaman: hingga Rp30 juta
 - Group Loan: repayment cash | Modal: repayment via AmarthaFin
+
+**Cara Mengajukan Pinjaman Modal:**
+1. Buka aplikasi/website Amartha
+2. Klik menu "Modal" di homepage
+3. Hubungi nomor Business Partner (BP) yang tertera di layar
+4. BP akan membantu proses pengajuan hingga pencairan
 
 ### 2. CELENGAN (Investasi untuk Pendana)
 Platform investasi mulai dari Rp10.000, semua jangka waktu 12 bulan, bisa ditarik setelah 1 bulan, keuntungan diterima tiap bulan, tanpa biaya admin:
@@ -125,6 +132,14 @@ Platform investasi mulai dari Rp10.000, semua jangka waktu 12 bulan, bisa ditari
 - **Celengan Warung Usaha Mikro**: 7%/tahun, min Rp50 juta (atau 8%/tahun, min Rp100 juta)
 - **Celengan Pendidikan Anak**: 5%/tahun, min Rp10.000
 
+**Cara Berinvestasi di Celengan:**
+1. Buka aplikasi/website Amartha dan klik menu "Celengan"
+2. Lakukan verifikasi data diri Anda
+3. Pilih tipe celengan yang sesuai dengan tujuan investasi Anda
+4. Masukkan nominal yang ingin diinvestasikan (pastikan saldo Pocket Amartha mencukupi)
+5. Masukkan PIN untuk konfirmasi
+6. Selesai! Investasi Anda aktif dan keuntungan akan diterima setiap bulan
+
 ### 3. AMARTHALINK (Agen PPOB)
 **Fitur layanan**: Pulsa, paket data, listrik, PDAM, internet & TV kabel, zakat & sedekah
 **Keuntungan jadi agen**:
@@ -134,7 +149,8 @@ Platform investasi mulai dari Rp10.000, semua jangka waktu 12 bulan, bisa ditari
 - Membantu pemberdayaan ekonomi lokal
 
 ## CARA MENJAWAB
-- Gunakan bahasa Indonesia yang ramah, sopan, dan hangat (target: ibu-ibu mitra)
+- Gunakan bahasa Indonesia yang ramah, sopan, dan hangat
+- Gunakan sapaan "Anda" (bukan "Ibu" atau "Bapak")
 - Jawaban singkat dan jelas (1-3 kalimat), hindari jargon teknis
 - HANYA jawab topik seputar Amartha dan layanan yang tersedia di amartha.com
 - Boleh jawab study case/issue mitra dan solusinya
@@ -144,7 +160,7 @@ Platform investasi mulai dari Rp10.000, semua jangka waktu 12 bulan, bisa ditari
 "Maaf, saya tidak dapat menjawab pertanyaan tersebut. Ada yang bisa saya bantu terkait layanan Amartha?"
 
 ## JIKA USER KOMPLAIN / BUTUH ESCALATION
-"Mohon maaf atas kendala yang Ibu/Bapak alami. Untuk penanganan lebih lanjut, silakan hubungi:
+"Mohon maaf atas kendala yang Anda alami. Untuk penanganan lebih lanjut, silakan hubungi:
 
 📞 Layanan Pengaduan Konsumen: 150170
 💬 WhatsApp: 0811-1915-0170
@@ -286,3 +302,148 @@ async def groq_stt_and_llm(
         "llm_raw": llm_json,
         "llm_text": llm_text
     }
+
+
+@router.post("/groq_stream")
+async def groq_stt_and_llm_stream(
+    audio: UploadFile = File(...),
+    stt_model: Optional[str] = None,
+    llm_model: Optional[str] = None
+):
+    """
+    STT + LLM with streaming response via Server-Sent Events (SSE).
+
+    Flow:
+      1. Transcribe audio via Groq STT
+      2. Stream LLM response via SSE
+
+    SSE Events:
+      - type: 'transcript' - Contains the transcribed text
+      - type: 'chunk' - Streaming chunks of LLM response
+      - type: 'done' - Final complete response
+      - type: 'error' - Error occurred
+    """
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured in environment")
+
+    # validate content type
+    ct = audio.content_type or ""
+    if not (ct.startswith("audio/") or ct.startswith("video/")):
+        raise HTTPException(status_code=400, detail="Upload an audio/video file (Content-Type audio/* or video/*)")
+
+    # save uploaded file to disk (streamed)
+    tmp_path = await save_upload_to_tempfile(audio)
+
+    # ---------- 1) Groq STT ----------
+    transcript = ""
+    try:
+        with open(tmp_path, "rb") as fh:
+            files = {"file": (os.path.basename(tmp_path), fh, ct)}
+            data = {"model": stt_model or GROQ_STT_MODEL}
+            headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                try:
+                    stt_resp = await client.post(GROQ_STT_URL, headers=headers, data=data, files=files)
+                except httpx.RequestError as req_err:
+                    logger.exception("Network error calling Groq STT: %s", repr(req_err))
+                    raise HTTPException(status_code=502, detail=f"Groq STT network error: {repr(req_err)}")
+
+        if stt_resp.status_code >= 400:
+            logger.error("Groq STT error %s: %s", stt_resp.status_code, stt_resp.text)
+            raise HTTPException(status_code=502, detail=f"Groq STT error: {stt_resp.text}")
+
+        try:
+            stt_json = stt_resp.json()
+        except ValueError as json_err:
+            logger.exception("Failed to parse JSON from Groq STT")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Groq STT returned invalid JSON: {repr(json_err)}"
+            )
+
+        transcript = stt_json.get("text") or stt_json.get("transcript") or ""
+    except HTTPException:
+        raise
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error("Groq STT request failed: %s\n%s", repr(e), tb)
+        raise HTTPException(status_code=502, detail=f"Groq STT request failed: {repr(e)}")
+    finally:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            logger.debug("Failed to remove tmp file %s", tmp_path)
+
+    # ---------- 2) Stream LLM Response ----------
+    async def generate_stream() -> AsyncGenerator[str, None]:
+        """Generate SSE stream of LLM response"""
+        # Send transcript first
+        yield f"data: {json.dumps({'type': 'transcript', 'content': transcript})}\n\n"
+
+        llm_endpoint = f"{GROQ_API_BASE.rstrip('/')}/chat/completions"
+        model_to_use = llm_model or GROQ_LLM_MODEL
+        user_prompt = f"Transcript:\n{transcript}\n\nPlease reply concisely according to the system rules."
+
+        llm_body = {
+            "model": model_to_use,
+            "messages": [
+                {"role": "system", "content": SYSTEM_CONTEXT},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": 0.0,
+            "max_tokens": 300,
+            "stream": True  # Enable streaming
+        }
+
+        full_response = ""
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+                async with client.stream("POST", llm_endpoint, headers=headers, json=llm_body) as llm_resp:
+                    if llm_resp.status_code >= 400:
+                        error_text = await llm_resp.aread()
+                        logger.error("Groq LLM error %s: %s", llm_resp.status_code, error_text.decode())
+                        yield f"data: {json.dumps({'type': 'error', 'content': 'Groq LLM error'})}\n\n"
+                        return
+
+                    # Stream chunks
+                    async for line in llm_resp.aiter_lines():
+                        if not line or line.startswith(":"):
+                            continue
+
+                        if line.startswith("data: "):
+                            line = line[6:]  # Remove "data: " prefix
+
+                        if line == "[DONE]":
+                            break
+
+                        try:
+                            chunk_json = json.loads(line)
+                            choices = chunk_json.get("choices", [])
+                            if choices and len(choices) > 0:
+                                delta = choices[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    full_response += content
+                                    yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
+                        except json.JSONDecodeError:
+                            continue
+
+            # Send done event
+            yield f"data: {json.dumps({'type': 'done', 'content': full_response})}\n\n"
+
+        except Exception as e:
+            tb = traceback.format_exc()
+            logger.error("Groq LLM stream failed: %s\n%s", repr(e), tb)
+            yield f"data: {json.dumps({'type': 'error', 'content': f'LLM error: {repr(e)}'})}\n\n"
+
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
