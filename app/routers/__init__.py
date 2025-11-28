@@ -1,3 +1,1 @@
-from . import item, chat
-
-__all__ = ["item", "chat"]
+# Routers are imported directly in main.py to avoid circular imports

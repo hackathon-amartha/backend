@@ -19,9 +19,11 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 
 class GeminiService:
+    MODEL_NAME = "gemini-2.5-flash-preview-05-20"
+
     def __init__(self):
         self.model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash",
+            model_name=self.MODEL_NAME,
         )
 
     def _build_history(
@@ -64,7 +66,7 @@ class GeminiService:
         """
         # Create model with system instruction
         model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash",
+            model_name=self.MODEL_NAME,
             system_instruction=system_instruction
         )
 
