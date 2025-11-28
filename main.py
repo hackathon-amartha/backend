@@ -1,7 +1,7 @@
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import item
+from app.routers import item, chat
 
 app = FastAPI(
     title="Amartha Hackathon API",
@@ -18,8 +18,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# API v1 router
+api_v1_router = APIRouter(prefix="/api/v1")
+api_v1_router.include_router(item.router)
+api_v1_router.include_router(chat.router)
 
-app.include_router(item.router)
+app.include_router(api_v1_router)
 
 
 @app.get("/")
