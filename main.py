@@ -22,10 +22,9 @@ app.add_middleware(
 # API v1 router
 api_v1_router = APIRouter(prefix="/api/v1")
 api_v1_router.include_router(chat_router)
+api_v1_router.include_router(stt_router)
 
 app.include_router(api_v1_router)
-
-app.include_router(stt_router)
 
 @app.get("/")
 async def root():
