@@ -2,7 +2,6 @@ from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
 from supabase import Client
-
 from app.database import get_supabase
 
 

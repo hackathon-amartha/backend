@@ -2,6 +2,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.chat import router as chat_router
+from app.services.stt import router as stt_router
 
 app = FastAPI(
     title="Amartha Hackathon API",
@@ -24,6 +25,7 @@ api_v1_router.include_router(chat_router)
 
 app.include_router(api_v1_router)
 
+app.include_router(stt_router)
 
 @app.get("/")
 async def root():
