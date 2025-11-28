@@ -19,7 +19,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 
 class GeminiService:
-    MODEL_NAME = "gemini-2.5-flash-preview-05-20"
+    MODEL_NAME = "gemini-2.5-flash"
 
     def __init__(self):
         self.model = genai.GenerativeModel(
