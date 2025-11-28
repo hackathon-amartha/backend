@@ -1,7 +1,8 @@
 import json
 from typing import Optional
 from uuid import UUID
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Header
+import base64
+from fastapi import APIRouter, HTTPException, Depends, Header
 from fastapi.responses import StreamingResponse
 from supabase import Client
 
@@ -116,9 +117,7 @@ async def delete_thread(
 # Chat endpoint with streaming
 @router.post("/send")
 async def send_message(
-    message: str = Form(...),
-    thread_id: Optional[str] = Form(None),
-    audio: Optional[UploadFile] = File(None),
+    request: ChatRequest,
     user_id: UUID = Depends(get_current_user_id),
     thread_service: ThreadService = Depends(get_thread_service),
     gemini_service: GeminiService = Depends(get_gemini_service),
@@ -129,18 +128,21 @@ async def send_message(
     - If thread_id is provided: continues existing conversation
     - If thread_id is not provided: creates a new thread
 
-    Supports both text and audio input.
+    Supports both text and audio input (audio as base64).
     Thread title is auto-generated for new threads.
     """
+    import logging
+    logging.info(f"[DEBUG] Received request: message={request.message[:50] if request.message else None}..., thread_id={request.thread_id}, has_audio={request.audio_base64 is not None}")
+
     from app.config import SYSTEM_INSTRUCTION
 
-    is_new_thread = thread_id is None
+    is_new_thread = request.thread_id is None
     history = []
     thread = None
 
-    if thread_id:
+    if request.thread_id:
         # Existing thread - get context
-        thread_uuid = UUID(thread_id)
+        thread_uuid = request.thread_id
         thread = await thread_service.get_thread(thread_uuid, user_id)
         if not thread:
             raise HTTPException(status_code=404, detail="Thread not found")
@@ -164,20 +166,20 @@ async def send_message(
         thread_uuid = UUID(thread["id"])
         system_instruction = SYSTEM_INSTRUCTION
 
-    # Process audio if provided
+    # Process audio if provided (decode from base64)
     audio_data = None
     audio_url = None
-    if audio:
-        audio_data = await audio.read()
+    if request.audio_base64:
+        audio_data = base64.b64decode(request.audio_base64)
         audio_url = await thread_service.upload_audio(
             user_id=user_id,
             thread_id=thread_uuid,
             audio_data=audio_data,
-            filename=audio.filename or "audio.wav"
+            filename="audio.wav"
         )
 
     # Save user message
-    user_message_content = message if message else "[Audio message]"
+    user_message_content = request.message if request.message else "[Audio message]"
     await thread_service.add_message(
         thread_id=thread_uuid,
         role="user",
@@ -194,7 +196,7 @@ async def send_message(
         full_response = ""
         try:
             async for chunk in gemini_service.chat_stream(
-                message=message,
+                message=request.message,
                 history=history,
                 system_instruction=system_instruction,
                 audio_data=audio_data,

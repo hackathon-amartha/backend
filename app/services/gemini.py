@@ -97,11 +97,18 @@ class GeminiService:
             parts.append({"text": message})
 
         # Send message and stream response
+        import logging
+        logging.info("[DEBUG] Sending message to Gemini with stream=True")
         response = await chat.send_message_async(parts, stream=True)
 
+        chunk_count = 0
         async for chunk in response:
             if chunk.text:
+                chunk_count += 1
+                logging.info(f"[DEBUG] Gemini chunk #{chunk_count}, length={len(chunk.text)}: {chunk.text[:50]}...")
                 yield chunk.text
+
+        logging.info(f"[DEBUG] Total chunks from Gemini: {chunk_count}")
 
     async def chat(
         self,

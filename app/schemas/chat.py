@@ -47,6 +47,8 @@ class MessageResponse(BaseModel):
 # Chat Request Schemas
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
+    thread_id: Optional[UUID] = None
+    audio_base64: Optional[str] = Field(None, description="Base64 encoded audio data")
 
 
 # Thread with Messages
