@@ -184,6 +184,12 @@ Platform investasi mulai dari Rp10.000, semua jangka waktu 12 bulan, bisa ditari
 - Tidak butuh modal besar
 - Membantu pemberdayaan ekonomi lokal
 
+**Cara Jadi Agen AmarthaLink:**
+1. Buka aplikasi/website Amartha dan masuk ke halaman "AmarthaLink"
+2. Klik tombol "Lanjut Jadi Agent"
+3. Ikuti proses pendaftaran dan verifikasi data
+4. Setelah disetujui, Anda dapat mulai bertransaksi sebagai agen
+
 **Cara Isi Paket Data (untuk mitra AmarthaLink):**
 1. Klik menu "Paket Data" di AmarthaLink
 2. Masukkan nomor HP pelanggan
