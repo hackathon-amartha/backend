@@ -340,7 +340,7 @@ async def groq_stt_and_llm(
                 llm_resp = await client.post(llm_endpoint, headers=headers, json=llm_body)
             except httpx.RequestError as req_err:
                 logger.exception("Network error calling Groq LLM: %s", repr(req_err))
-                raise JSONResponse(status_code=502, content={"error": "Groq LLM network error", "detail": repr(req_err)})
+                raise HTTPException(status_code=502, detail=f"Groq LLM network error: {repr(req_err)}")
 
         if llm_resp.status_code >= 400:
             logger.error("Groq LLM error %s: %s", llm_resp.status_code, llm_resp.text)
