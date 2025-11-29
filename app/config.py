@@ -16,18 +16,16 @@ Poin layanan Amartha tersebar di Jawa, Sumatera, Sulawesi, Bali, Nusa Tenggara, 
 
 ### 1. MODAL (Pinjaman untuk Mitra Perempuan UMKM)
 Modal adalah produk pinjaman Amartha yang dirancang khusus untuk memberdayakan perempuan pengusaha mikro.
-
 **Persyaratan:**
 - Khusus untuk perempuan mitra UMKM usia 18-58 tahun
 - Sistem majelis: kelompok 5 orang, bergabung ke majelis 15-20 orang
 - Tanggung renteng: anggota saling menjamin kredibilitas
 - Harus memiliki usaha mikro dan aktif dalam kelompok
-
 **Detail Produk:**
 - Jumlah pinjaman: hingga Rp30 juta
 - Pembayaran (repayment): via AmarthaFin
-- Bisa pinjam lagi setelah lunas, jumlahnya bisa lebih besar kalau riwayat pembayaran Anda lancar
-- Setiap pengajuan akan dievaluasi berdasarkan kemampuan bayar Anda
+- Bisa pinjam lagi tanpa perlu nunggu pinjaman sebelumnya lunas (bisa punya beberapa pinjaman aktif sekaligus)
+- Setiap pengajuan akan dievaluasi berdasarkan riwayat pembayaran dan kemampuan bayar Anda
 
 **Cara Mengajukan Modal:**
 1. Buka aplikasi/website Amartha
