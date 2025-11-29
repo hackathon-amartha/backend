@@ -1,6 +1,23 @@
-# Amartha Hackathon Backend
+# Amartha Assist Backend
 
-FastAPI backend with Gemini AI and Groq AI integration, Supabase database, and Cloudflare Tunnel support.
+AI-powered customer service API for Amartha, providing intelligent chat assistance and speech-to-text capabilities.
+
+## Overview
+
+This backend powers the Amartha Assist chatbot, an AI customer service assistant trained to help users with:
+- **Modal** - Microloan applications for women entrepreneurs (up to Rp30 million)
+- **Celengan** - Investment products (5-8% annual returns, starting from Rp10,000)
+- **AmarthaLink** - PPOB agent services (pulsa, bills, cash withdrawal)
+
+The AI responds in the user's language (Indonesian, Sundanese, Javanese, etc.) with friendly, concise answers.
+
+## Tech Stack
+
+- **Framework**: FastAPI with async support
+- **AI Models**: Google Gemini (chat), Groq Whisper (STT) + Llama (LLM)
+- **Database**: Supabase (PostgreSQL)
+- **Streaming**: Server-Sent Events (SSE) for real-time responses
+- **Deployment**: Docker with Cloudflare Tunnel
 
 ## Quick Start (Docker)
 
